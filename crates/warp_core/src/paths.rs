@@ -157,9 +157,11 @@ pub fn state_dir() -> PathBuf {
 ///
 /// On macOS, this will use the App Group container directory if available.
 pub fn secure_state_dir() -> Option<PathBuf> {
-    // Do not use the secure state directory in integration tests, which have a temporary home directory instead.
-    if ChannelState::channel() == Channel::Integration {
-        return None;
+    // Do not use the secure state directory in integration, Oss, Local, and Dev channels
+    // to avoid Sandboxing / App Group permission prompts when signed ad-hoc.
+    match ChannelState::channel() {
+        Channel::Integration | Channel::Oss | Channel::Local | Channel::Dev => return None,
+        _ => {}
     }
 
     #[cfg(target_os = "macos")]

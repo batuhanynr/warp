@@ -99,35 +99,9 @@ impl TelemetryCollector {
     /// * Write events to disk, for sending on the next app startup
     /// * Synchronously send events to rudderstack
     pub fn flush_telemetry_events_for_shutdown(&self, ctx: &mut ModelContext<TelemetryCollector>) {
-        let execution_mode = AppExecutionMode::as_ref(ctx);
-
-        if execution_mode.send_telemetry_at_shutdown() {
-            let privacy_settings_snapshot = PrivacySettings::as_ref(ctx).get_snapshot(ctx);
-            let server_api = self.server_api.clone();
-            match warpui::r#async::block_on(async move {
-                server_api
-                    .flush_telemetry_events(privacy_settings_snapshot)
-                    .with_timeout(TELEMETRY_SHUTDOWN_FLUSH_TIMEOUT)
-                    .await
-            }) {
-                Ok(Ok(count)) => {
-                    if count > 0 {
-                        log::info!("Successfully flushed telemetry events before shutdown");
-                    }
-                }
-                Ok(Err(e)) => {
-                    report_error!(e.context("Error flushing telemetry events before shutdown"));
-                }
-                Err(_) => {
-                    log::warn!(
-                        "Telemetry flush timed out after {}s during shutdown, skipping",
-                        TELEMETRY_SHUTDOWN_FLUSH_TIMEOUT.as_secs()
-                    );
-                }
-            }
-        } else {
-            self.write_telemetry_events_to_disk(ctx);
-        }
+        // Bypass synchronous telemetry flushing during shutdown to avoid delay on Cmd+Q
+        // and instantly write to disk instead.
+        self.write_telemetry_events_to_disk(ctx);
     }
 
     /// Sends rudderstack requests containing events persisted to disk (if telemetry is enabled).
