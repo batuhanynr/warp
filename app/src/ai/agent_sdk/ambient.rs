@@ -22,7 +22,7 @@ use warpui::r#async::{Spawnable, Timer};
 use warpui::{AppContext, ModelContext, SingletonEntity};
 
 use super::common::{parse_ambient_task_id, EnvironmentChoice, ResolveConfigurationError};
-use crate::ai::agent::extract_user_query_mode;
+use crate::ai::agent::{extract_user_query_mode, UserQueryMode};
 use crate::ai::agent_sdk::driver::attachments::{
     process_attachment, MAX_ATTACHMENT_COUNT_FOR_CLOUD_QUERY,
 };
@@ -262,11 +262,8 @@ impl AmbientAgentRunner {
                 );
                 return;
             }
-
-            // TODO: Consider making the server's prompt field optional when skill is provided,
-            // rather than sending an empty string for skill-only invocations.
-            let prompt_string = match prompt {
-                Some(Prompt::PlainText(text)) => text,
+            let prompt = match prompt {
+                Some(Prompt::PlainText(text)) => Some(text),
                 Some(Prompt::SavedPrompt(id)) => {
                     // Resolve the saved prompt to pass along as the ambient agent query.
                     // We look up the prompt text here, rather than passing along the saved prompt ID,
@@ -290,7 +287,7 @@ impl AmbientAgentRunner {
 
                     match workflow {
                         Some(cloud_workflow) => match cloud_workflow.model().data.prompt() {
-                            Some(prompt_text) => prompt_text.to_string(),
+                            Some(prompt_text) => Some(prompt_text.to_string()),
                             None => {
                                 super::report_fatal_error(
                                     anyhow::anyhow!("'{id}' is not a saved prompt"),
@@ -308,8 +305,7 @@ impl AmbientAgentRunner {
                         }
                     }
                 }
-                // Skill-only invocation: use empty prompt, skill provides instructions
-                None => String::new(),
+                None => None,
             };
 
             let loaded_file = match args.config_file.file.as_deref() {
@@ -322,6 +318,23 @@ impl AmbientAgentRunner {
                 },
                 None => None,
             };
+
+            // The `--runner` CLI flag is gated in `run_agent`, but a config file
+            // can also set `runner_id`, which would otherwise bypass the gate.
+            if loaded_file
+                .as_ref()
+                .and_then(|f| f.file.runner_id.as_ref())
+                .is_some()
+                && !FeatureFlag::CloudRunners.is_enabled()
+            {
+                super::report_fatal_error(
+                    anyhow::anyhow!(
+                        "`runner_id` is set in the config file but runner support is not enabled"
+                    ),
+                    ctx,
+                );
+                return;
+            }
 
             // Validate and process attachments early, before environment selection
             // This ensures users don't have to go through env selection if attachment validation fails
@@ -427,6 +440,7 @@ impl AmbientAgentRunner {
                 AgentConfigSnapshot {
                     name: args.name,
                     environment_id,
+                    runner_id: args.runner,
                     model_id: args.model.model.clone(),
                     base_prompt: None,
                     mcp_servers: cli_mcp_servers,
@@ -470,7 +484,13 @@ impl AmbientAgentRunner {
                 None
             };
 
-            let (prompt, mode) = extract_user_query_mode(prompt_string);
+            let (prompt, mode) = match prompt {
+                Some(prompt) => {
+                    let (prompt, mode) = extract_user_query_mode(prompt);
+                    (Some(prompt), mode)
+                }
+                None => (None, UserQueryMode::Normal),
+            };
             let request = SpawnAgentRequest {
                 prompt,
                 mode,
@@ -491,6 +511,7 @@ impl AmbientAgentRunner {
                 conversation_id: args.conversation,
                 initial_snapshot_token: None,
                 snapshot_disabled: None,
+                orchestration_handoff: None,
             };
 
             let should_open = args.open;

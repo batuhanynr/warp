@@ -1,10 +1,13 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 use std::future::Future;
 use std::sync::mpsc::SyncSender;
 use std::sync::Arc;
 use std::time::Duration;
 
 use chrono::{DateTime, Utc};
+#[cfg(test)]
+pub use cloud_object_client::GetCloudObjectResponse;
+pub use cloud_object_client::InitialLoadResponse;
 use futures::channel::oneshot::{self, Receiver};
 use futures::stream::AbortHandle;
 use itertools::Itertools;
@@ -18,7 +21,7 @@ use warp_graphql::scalars::time::ServerTimestamp;
 use warp_util::sync::Condition;
 use warpui::r#async::{FutureId, Timer};
 use warpui::{
-    duration_with_jitter, AppContext, Entity, ModelContext, RequestState, RetryOption,
+    duration_with_jitter, AppContext, Entity, ModelContext, ModelHandle, RequestState, RetryOption,
     SingletonEntity,
 };
 
@@ -52,9 +55,14 @@ use crate::cloud_object::{
     ObjectDeleteResult, ObjectIdType, ObjectMetadataUpdateResult, ObjectPermissionsUpdateData,
     ObjectType, Owner, Revision, RevisionAndLastEditor, ServerAIExecutionProfile, ServerAIFact,
     ServerAmbientAgentEnvironment, ServerCloudAgentConfig, ServerCloudObject,
-    ServerEnvVarCollection, ServerFolder, ServerMCPServer, ServerMetadata, ServerNotebook,
-    ServerObject, ServerPermissions, ServerPreference, ServerScheduledAmbientAgent,
-    ServerTemplatableMCPServer, ServerWorkflow, ServerWorkflowEnum, Space, UpdateCloudObjectResult,
+    ServerEnvVarCollection, ServerMCPServer, ServerMetadata, ServerPermissions, ServerPreference,
+    ServerScheduledAmbientAgent, ServerTemplatableMCPServer, ServerWorkflowEnum, Space,
+    UpdateCloudObjectResult,
+};
+use crate::drive::drive_helpers::{
+    is_feature_gated_anonymous_user_past_env_var_limit,
+    is_feature_gated_anonymous_user_past_notebook_limit,
+    is_feature_gated_anonymous_user_past_workflow_limit,
 };
 use crate::drive::folders::{CloudFolderModel, FolderId};
 use crate::drive::sharing::SharingAccessLevel;
@@ -162,27 +170,6 @@ pub enum InitiatedBy {
     User,
     System,
 }
-#[derive(Default)]
-pub struct InitialLoadResponse {
-    pub updated_notebooks: Vec<ServerNotebook>,
-    pub deleted_notebooks: Vec<NotebookId>,
-    pub updated_workflows: Vec<ServerWorkflow>,
-    pub deleted_workflows: Vec<WorkflowId>,
-    pub updated_folders: Vec<ServerFolder>,
-    pub deleted_folders: Vec<FolderId>,
-    pub updated_generic_string_objects:
-        HashMap<GenericStringObjectFormat, Vec<Box<dyn ServerObject>>>,
-    pub deleted_generic_string_objects: Vec<GenericStringObjectId>,
-    pub user_profiles: Vec<UserProfileWithUID>,
-    pub action_histories: Vec<ObjectActionHistory>,
-    pub mcp_gallery: Vec<MCPGalleryTemplate>,
-}
-
-pub struct GetCloudObjectResponse {
-    pub object: ServerCloudObject,
-    pub descendants: Vec<ServerCloudObject>,
-    pub action_histories: Vec<ObjectActionHistory>,
-}
 
 #[derive(Debug)]
 pub struct GenericStringObjectInput<T, S>
@@ -221,7 +208,7 @@ impl UpdateManager {
         ctx: &mut ModelContext<Self>,
     ) -> Self {
         let network_status = NetworkStatus::handle(ctx);
-        ctx.subscribe_to_model(&network_status, |me, event, ctx| {
+        ctx.subscribe_to_model(&network_status, |me, _, event, ctx| {
             me.handle_network_status_changed(event, ctx);
         });
 
@@ -229,7 +216,7 @@ impl UpdateManager {
         ctx.subscribe_to_model(&team_tester_status, Self::handle_team_tester_status_changed);
 
         let sync_queue = SyncQueue::handle(ctx);
-        ctx.subscribe_to_model(&sync_queue, |me, event, ctx| {
+        ctx.subscribe_to_model(&sync_queue, |me, _, event, ctx| {
             me.handle_model_event(event, ctx);
         });
 
@@ -319,6 +306,7 @@ impl UpdateManager {
 
     fn handle_team_tester_status_changed(
         &mut self,
+        _: ModelHandle<TeamTesterStatus>,
         event: &TeamTesterStatusEvent,
         ctx: &mut ModelContext<Self>,
     ) {
@@ -3356,10 +3344,10 @@ impl UpdateManager {
                 .count()
         });
         if AuthStateProvider::handle(ctx).read(ctx, |auth_state_provider, _ctx| {
-            auth_state_provider
-                .get()
-                .is_anonymous_user_past_object_limit(ObjectType::Notebook, count + 1)
-                .unwrap_or_default()
+            is_feature_gated_anonymous_user_past_notebook_limit(
+                auth_state_provider.get(),
+                count + 1,
+            )
         }) {
             AuthManager::handle(ctx).update(ctx, |auth_manager: &mut AuthManager, ctx| {
                 auth_manager.anonymous_user_hit_drive_object_limit(ctx);
@@ -3427,10 +3415,10 @@ impl UpdateManager {
                 .count()
         });
         if AuthStateProvider::handle(ctx).read(ctx, |auth_state_provider, _ctx| {
-            auth_state_provider
-                .get()
-                .is_anonymous_user_past_object_limit(ObjectType::Workflow, count + 1)
-                .unwrap_or_default()
+            is_feature_gated_anonymous_user_past_workflow_limit(
+                auth_state_provider.get(),
+                count + 1,
+            )
         }) {
             AuthManager::handle(ctx).update(ctx, |auth_manager: &mut AuthManager, ctx| {
                 auth_manager.anonymous_user_hit_drive_object_limit(ctx);
@@ -3492,14 +3480,8 @@ impl UpdateManager {
                 .active_non_welcome_env_var_collections_in_space(Space::Personal, ctx)
                 .count()
         });
-        let env_var_collection_type = ObjectType::GenericStringObject(
-            GenericStringObjectFormat::Json(JsonObjectType::EnvVarCollection),
-        );
         if AuthStateProvider::handle(ctx).read(ctx, |auth_state_provider, _ctx| {
-            auth_state_provider
-                .get()
-                .is_anonymous_user_past_object_limit(env_var_collection_type, count + 1)
-                .unwrap_or_default()
+            is_feature_gated_anonymous_user_past_env_var_limit(auth_state_provider.get(), count + 1)
         }) {
             AuthManager::handle(ctx).update(ctx, |auth_manager: &mut AuthManager, ctx| {
                 auth_manager.anonymous_user_hit_drive_object_limit(ctx);

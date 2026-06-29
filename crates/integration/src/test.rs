@@ -19,6 +19,7 @@ mod pane_restoration;
 #[cfg(target_os = "macos")]
 mod preview_config_migration;
 mod remote_server;
+mod rich_input_ctrl_enter;
 mod rules;
 mod secrets;
 mod session_restoration;
@@ -63,6 +64,7 @@ use pathfinder_geometry::vector::Vector2F;
 #[cfg(target_os = "macos")]
 pub use preview_config_migration::*;
 pub use remote_server::*;
+pub use rich_input_ctrl_enter::*;
 pub use rules::*;
 use rust_embed::RustEmbed;
 pub use secrets::*;
@@ -159,6 +161,7 @@ use warp::terminal::block_list_viewport::{InputMode, ScrollLines, ScrollPosition
 use warp::terminal::find::TerminalFindModel;
 use warp::terminal::input::{Input, InputSuggestionsMode};
 use warp::terminal::keys_settings::KeysSettings;
+use warp::terminal::local_tty::TerminalManager as LocalTtyTerminalManager;
 use warp::terminal::model::ansi::{Handler, InitShellValue};
 use warp::terminal::model::blocks::{BlockHeightItem, BlockHeightSummary, TotalIndex};
 use warp::terminal::model::grid::grid_handler::TermMode;
@@ -175,14 +178,14 @@ use warp::workspace::{
     Workspace, WorkspaceAction, NEW_SESSION_MENU_BUTTON_POSITION_ID, NEW_TAB_BUTTON_POSITION_ID,
 };
 use warp::{cmd_or_ctrl_shift, AgentModeEntrypoint};
-use warpui::event::KeyState;
-use warpui::integration::{AssertionOutcome, StepData, TestStep};
-use warpui::keymap::{Keystroke, PerPlatformKeystroke, Trigger};
-use warpui::platform::keyboard::KeyCode;
-use warpui::platform::{OperatingSystem, TerminationMode};
-use warpui::units::Lines;
-use warpui::windowing::WindowManager;
-use warpui::{
+use warpui_core::event::KeyState;
+use warpui_core::integration::{AssertionOutcome, StepData, TestStep};
+use warpui_core::keymap::{Keystroke, PerPlatformKeystroke, Trigger};
+use warpui_core::platform::keyboard::KeyCode;
+use warpui_core::platform::{OperatingSystem, TerminationMode};
+use warpui_core::units::Lines;
+use warpui_core::windowing::WindowManager;
+use warpui_core::{
     async_assert, async_assert_eq, AssetProvider, Event, SingletonEntity, UpdateView, ViewHandle,
 };
 pub use websockets::*;
@@ -1879,8 +1882,8 @@ pub fn test_change_font_size() -> Builder {
     new_builder()
         .with_step(wait_until_bootstrapped_single_pane_for_tab(0))
         .with_step(
-            new_step_with_default_assertions("Press ctrl-shift-> and verify font size increases")
-                .with_keystrokes(&["ctrl-shift->"])
+            new_step_with_default_assertions("Press alt-shift-> and verify font size increases")
+                .with_keystrokes(&["alt-shift->"])
                 .add_assertion(|app, window_id| {
                     let input_view = single_input_view_for_tab(app, window_id, 0);
                     input_view.read(app, |view, _ctx| {
@@ -1901,8 +1904,8 @@ pub fn test_change_font_size() -> Builder {
                 }),
         )
         .with_step(
-            new_step_with_default_assertions("Press ctrl-shift-< and verify font size decreases")
-                .with_keystrokes(&["ctrl-shift-<"])
+            new_step_with_default_assertions("Press alt-shift-< and verify font size decreases")
+                .with_keystrokes(&["alt-shift-<"])
                 .add_assertion(|app, window_id| {
                     let input_view = single_input_view_for_tab(app, window_id, 0);
                     input_view.read(app, |view, _ctx| {
@@ -2003,7 +2006,7 @@ pub fn test_add_and_close_session() -> Builder {
                                     .expect("pane at index 0 is a terminal pane")
                                     .as_ref(ctx)
                                     .as_any()
-                                    .downcast_ref::<warp::terminal::local_tty::TerminalManager>()
+                                    .downcast_ref::<LocalTtyTerminalManager<TerminalView>>()
                                     .expect("terminal pane at index 0 contains a local session")
                                     .pid()
                                     .expect("shell should be spawned")
@@ -5863,6 +5866,28 @@ pub fn test_copy_prompt_from_input_honor_ps1_disabled() -> Builder {
                 .with_click_on_saved_position("Copy prompt")
                 .add_assertion(assert_clipboard_contains_string("~".into())),
         )
+}
+pub fn test_warp_prompt_unsets_zsh_rprompt() -> Builder {
+    new_builder()
+        .set_should_run_test(|| {
+            let (starter, _) = current_shell_starter_and_version();
+            starter.shell_type() == shell::ShellType::Zsh
+        })
+        .with_user_defaults(HashMap::from([(
+            HonorPS1::storage_key().to_owned(),
+            false.to_string(),
+        )]))
+        .with_setup(|utils| {
+            let dir = utils.test_dir();
+            write_rc_files_for_test(&dir, r#"export RPROMPT="right prompt""#, [ShellRcType::Zsh]);
+        })
+        .with_step(wait_until_bootstrapped_single_pane_for_tab(0))
+        .with_step(execute_command_for_single_terminal_in_tab(
+            0,
+            "print -r -- ${+RPROMPT}".into(),
+            ExpectedExitStatus::Success,
+            ExactLine::from("0"),
+        ))
 }
 
 pub fn test_copy_prompt_from_input_honor_ps1_enabled() -> Builder {
