@@ -711,7 +711,7 @@ if [[ "$ARTIFACT" == "app" ]]; then
 
   "$WORKSPACE_ROOT_DIR/script/compile_icon" "$RELEASE_CHANNEL" "$BUNDLE_DIR/$WARP_APP_NAME.app"
 
-  CUSTOM_ICNS_PATH="$WORKSPACE_ROOT_DIR/app/channels/$RELEASE_CHANNEL/icon/WarpBatuhanynr.icns"
+  CUSTOM_ICNS_PATH="$WORKSPACE_ROOT_DIR/app/channels/local/icon/AppIcon.icon/Assets/WarpBatuhanynr.icns"
   if [[ -f "$CUSTOM_ICNS_PATH" ]]; then
     echo "Copying custom icon $(basename "$CUSTOM_ICNS_PATH")..."
     cp "$CUSTOM_ICNS_PATH" "$BUNDLED_RESOURCES_DIR/WarpBatuhanynr.icns"

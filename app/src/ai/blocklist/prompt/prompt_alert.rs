@@ -566,37 +566,7 @@ impl View for PromptAlertView {
 
         self.primary_text(&state, &mut text_fragments);
 
-        let auth_state = AuthStateProvider::as_ref(app).get();
-        let current_team = workspaces.team_for_view_handle(&self.view_handle, app);
-        // A teamless user can be considered the admin of their non-existent team.
-        let has_admin_permissions = current_team.is_none_or(|team| {
-            auth_state
-                .user_email()
-                .is_some_and(|email| team.has_admin_permissions(&email))
-        });
-
-        let can_purchase_addon_credits = workspaces
-            .purchase_policy()
-            .is_some_and(|policy| policy.allows_purchases());
-
-        let suggest_buy_credits = can_purchase_addon_credits
-            && has_admin_permissions
-            && matches!(
-                state,
-                PromptAlertState::RequestLimitReached
-                    | PromptAlertState::OveragesToggleableButNotEnabled
-                    | PromptAlertState::MonthlyOveragesSpendLimitReached
-            );
-
-        if suggest_buy_credits {
-            text_fragments.push(FormattedTextFragment::plain_text("  "));
-            text_fragments.push(FormattedTextFragment::hyperlink_action(
-                "Add credits",
-                WorkspaceAction::ShowSettingsPage(SettingsSection::BillingAndUsage),
-            ));
-        } else {
-            self.action_hyperlink(&state, &mut text_fragments, app);
-        }
+        self.action_hyperlink(&state, &mut text_fragments, app);
 
         let formatted_text_element = FormattedTextElement::new(
             FormattedText::new([FormattedTextLine::Line(text_fragments)]),

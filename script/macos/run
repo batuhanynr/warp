@@ -130,9 +130,10 @@ NO_LICENSES=1 "${REPO_ROOT}/script/prepare_bundled_resources" "$WARP_APP_PATH/Co
 
 "${REPO_ROOT}/script/compile_icon" "$WARP_CHANNEL" "$WARP_APP_PATH"
 
-if [ -f "/Users/batuhan/Downloads/WarpBatuhanynr.icns" ]; then
-  echo "Copying custom icon WarpBatuhanynr.icns from Downloads..."
-  cp "/Users/batuhan/Downloads/WarpBatuhanynr.icns" "$WARP_APP_PATH/Contents/Resources/WarpBatuhanynr.icns"
+CUSTOM_ICNS_PATH="app/channels/local/icon/AppIcon.icon/Assets/WarpBatuhanynr.icns"
+if [ -f "$CUSTOM_ICNS_PATH" ]; then
+  echo "Copying custom icon WarpBatuhanynr.icns..."
+  cp "$CUSTOM_ICNS_PATH" "$WARP_APP_PATH/Contents/Resources/WarpBatuhanynr.icns"
   plutil -replace CFBundleIconFile -string "WarpBatuhanynr" "$WARP_APP_PATH/Contents/Info.plist"
 fi
 
